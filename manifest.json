@@ -1,0 +1,24 @@
+{
+  "name": "Finanças Pessoais",
+  "short_name": "Finanças",
+  "description": "Organize seus gastos mensais com estilo iOS 26",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a0a12",
+  "theme_color": "#0a0a12",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "apple touch icon"
+    }
+  ]
+}
