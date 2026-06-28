@@ -315,13 +315,13 @@ select.edit-input option{background:#1c1c1e;color:#fff}
     </div>
     <div class="glass-card chart-card">
       <div class="chart-title">Distribui&#231;&#227;o de gastos</div>
-      <canvas id="pie-canvas" width="210" height="210"></canvas>
+      <canvas id="pie-canvas" style="width:210px;height:210px"></canvas>
       <div id="pie-legend" class="legend"></div>
       <div id="pie-empty" class="empty-state" style="display:none"><div class="icon">&#128202;</div><div>Sem dados para este m&#234;s.</div></div>
     </div>
     <div class="glass-card chart-card">
       <div class="chart-title">Tend&#234;ncia &#8212; &#250;ltimos 6 meses</div>
-      <canvas id="trend-canvas" width="320" height="140"></canvas>
+      <canvas id="trend-canvas" style="width:100%;height:140px"></canvas>
       <div id="trend-labels" class="trend-labels"></div>
     </div>
     <div class="glass-card chart-card">
@@ -653,9 +653,18 @@ function renderHome(){
 }
 
 /* PIE */
-function drawPie(data,canvas){
+function setupCanvas(canvas){
+  const dpr=window.devicePixelRatio||1;
+  const rect=canvas.getBoundingClientRect();
+  canvas.width=Math.round(rect.width*dpr);
+  canvas.height=Math.round(rect.height*dpr);
   const ctx=canvas.getContext('2d');
-  const W=canvas.width,H=canvas.height,cx=W/2,cy=H/2,r=W*.42,inner=r*.56;
+  ctx.scale(dpr,dpr);
+  return{ctx,W:rect.width,H:rect.height};
+}
+function drawPie(data,canvas){
+  const{ctx,W,H}=setupCanvas(canvas);
+  const cx=W/2,cy=H/2,r=W*.42,inner=r*.56;
   ctx.clearRect(0,0,W,H);
   if(!data.length)return;
   const total=data.reduce((s,d)=>s+d.value,0);
@@ -677,8 +686,7 @@ function drawPie(data,canvas){
 
 /* TREND */
 function drawTrend(monthlyData,canvas,labelsEl){
-  const ctx=canvas.getContext('2d');
-  const W=canvas.width,H=canvas.height;
+  const{ctx,W,H}=setupCanvas(canvas);
   ctx.clearRect(0,0,W,H);
   const vals=monthlyData.map(m=>m.total);
   const maxV=Math.max(...vals,1);
