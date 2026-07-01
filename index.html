@@ -188,180 +188,6 @@ select.form-input option{background:#1c1c1e;color:#fff}
 #toast{position:fixed;bottom:calc(var(--tab-height)+20px);left:50%;transform:translateX(-50%) translateY(20px);background:rgba(36,36,40,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:12px 22px;font-size:15px;font-weight:500;white-space:nowrap;opacity:0;pointer-events:none;z-index:999;transition:opacity .25s,transform .25s}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-/* ══════════ AI ASSISTANT ══════════ */
-let aiHistory = [];
-let aiInitDone = false;
-
-function initAiTab() {
-  if (aiInitDone) return;
-  aiInitDone = true;
-  // auto-resize textarea
-  const inp = document.getElementById('ai-input');
-  inp.addEventListener('input', () => {
-    inp.style.height = 'auto';
-    inp.style.height = Math.min(inp.scrollHeight, 100) + 'px';
-  });
-  inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAiMessage(); }
-  });
-}
-
-function buildFinancialContext() {
-  const now = new Date();
-  const months = [];
-  for (let i = 2; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const txs = txForMonth(d);
-    const bycat = {};
-    txs.forEach(t => {
-      const cat = t._cat || catById(t.category_id);
-      bycat[cat.name] = (bycat[cat.name] || 0) + t.value;
-    });
-    months.push({
-      mes: d.toLocaleDateString('pt-BR', {month:'long', year:'numeric'}),
-      total: txs.reduce((s,t)=>s+t.value,0).toFixed(2),
-      porCategoria: bycat,
-      lancamentos: txs.map(t => ({
-        nome: t.name,
-        valor: t.value,
-        categoria: (t._cat||catById(t.category_id)).name,
-        data: t.date,
-        pagoPor: String(t.paid_by).trim() === String(session?.user?.id).trim()
-          ? (profile?.name || 'Você')
-          : (t._payer?.name || 'Cônjuge')
-      }))
-    });
-  }
-
-  const orcamentos = budgets.map(b => {
-    const cat = catById(b.category_id);
-    const gasto = txForMonth(new Date(now.getFullYear(), now.getMonth(), 1))
-      .filter(t => t.category_id === b.category_id)
-      .reduce((s,t)=>s+t.value, 0);
-    return { categoria: cat.name, limite: b.amount, gasto: gasto.toFixed(2), excedido: gasto > b.amount };
-  });
-
-  return `Você é um assistente financeiro pessoal inteligente e amigável. Responda SEMPRE em português brasileiro. Seja direto, use emojis com moderação e formate bem as respostas com listas quando apropriado.
-
-DADOS FINANCEIROS DO USUÁRIO (últimos 3 meses):
-${JSON.stringify(months, null, 2)}
-
-ORÇAMENTOS DEFINIDOS:
-${orcamentos.length ? JSON.stringify(orcamentos, null, 2) : 'Nenhum orçamento definido ainda.'}
-
-USUÁRIOS: ${profiles.map(p => p.id === session?.user?.id ? p.name+' (você)' : p.name).join(' e ')}
-
-Use esses dados para responder perguntas sobre gastos, tendências, economias e conselhos financeiros personalizados.`;
-}
-
-function appendMsg(role, text) {
-  const msgs = document.getElementById('ai-messages');
-  const time = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-
-  // Hide suggestions after first user message
-  if (role === 'user') {
-    document.getElementById('ai-suggestions').style.display = 'none';
-  }
-
-  const div = document.createElement('div');
-  div.className = 'msg ' + role;
-
-  if (role === 'ai') {
-    div.innerHTML =
-      '<div class="ai-avatar">&#129302;</div>' +
-      '<div class="msg-content">' +
-        '<div class="msg-bubble">' + text.replace(/
-/g,'<br>') + '</div>' +
-        '<div class="msg-time">' + time + '</div>' +
-      '</div>';
-  } else {
-    div.innerHTML =
-      '<div class="msg-bubble">' + text.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>' +
-      '<div class="msg-time">' + time + '</div>';
-  }
-
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  return div;
-}
-
-function appendTyping() {
-  const msgs = document.getElementById('ai-messages');
-  const div = document.createElement('div');
-  div.className = 'msg ai';
-  div.id = 'ai-typing';
-  div.innerHTML =
-    '<div class="ai-avatar">&#129302;</div>' +
-    '<div class="msg-content"><div class="msg-bubble"><div class="typing-dots">' +
-      '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>' +
-    '</div></div></div>';
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-}
-
-async function sendAiMessage(text) {
-  const inp = document.getElementById('ai-input');
-  const sendBtn = document.getElementById('ai-send-btn');
-  const userText = text || inp.value.trim();
-  if (!userText) return;
-
-  inp.value = '';
-  inp.style.height = 'auto';
-  sendBtn.disabled = true;
-
-  appendMsg('user', userText);
-  aiHistory.push({ role: 'user', content: userText });
-
-  appendTyping();
-
-  try {
-    const systemPrompt = buildFinancialContext();
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: aiHistory
-      })
-    });
-
-    const data = await response.json();
-    const reply = data.content?.[0]?.text || 'Desculpe, não consegui processar sua pergunta.';
-
-    document.getElementById('ai-typing')?.remove();
-    appendMsg('ai', reply);
-    aiHistory.push({ role: 'assistant', content: reply });
-
-  } catch(e) {
-    document.getElementById('ai-typing')?.remove();
-    appendMsg('ai', 'Erro ao conectar com o assistente. Verifique sua conexão e tente novamente.');
-  }
-
-  sendBtn.disabled = false;
-  inp.focus();
-}
-
-document.getElementById('ai-send-btn').addEventListener('click', () => sendAiMessage());
-
-document.getElementById('ai-clear-btn').addEventListener('click', () => {
-  aiHistory = [];
-  const msgs = document.getElementById('ai-messages');
-  msgs.innerHTML =
-    '<div class="ai-welcome">' +
-      '<div class="ai-welcome-icon">&#129302;</div>' +
-      '<div class="ai-welcome-title">Ol&#225;! Sou seu assistente financeiro.</div>' +
-      '<div class="ai-welcome-sub">Tenho acesso a todos os seus lan&#231;amentos e posso te ajudar a entender melhor seus gastos.</div>' +
-    '</div>';
-  document.getElementById('ai-suggestions').style.display = 'flex';
-});
-
-document.getElementById('ai-suggestions').addEventListener('click', e => {
-  const chip = e.target.closest('.ai-chip');
-  if (chip) sendAiMessage(chip.dataset.q);
-});
-
 /* GENERIC MODAL */
 #modal-overlay{display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);align-items:flex-end;justify-content:center}
 #modal-overlay.open{display:flex}
@@ -630,15 +456,15 @@ select.edit-input option{background:#1c1c1e;color:#fff}
   <div class="ai-header">
     <div class="ai-header-left">
       <div class="page-title">Assistente</div>
-      <div class="page-subtitle">Powered by Claude AI</div>
+      <div class="page-subtitle">Análise local dos seus gastos</div>
     </div>
     <button class="ai-clear-btn" id="ai-clear-btn">Limpar</button>
   </div>
   <div id="ai-messages">
     <div class="ai-welcome">
-      <div class="ai-welcome-icon">&#129302;</div>
+      <div class="ai-welcome-icon">&#128202;</div>
       <div class="ai-welcome-title">Ol&#225;! Sou seu assistente financeiro.</div>
-      <div class="ai-welcome-sub">Tenho acesso a todos os seus lan&#231;amentos e posso te ajudar a entender melhor seus gastos.</div>
+      <div class="ai-welcome-sub">Analiso seus lan&#231;amentos localmente, sem custo. Pergunte sobre seus gastos!</div>
     </div>
   </div>
   <div class="ai-suggestions" id="ai-suggestions">
@@ -1160,14 +986,12 @@ document.getElementById('export-btn').addEventListener('click',()=>{
 });
 
 
-/* ══════════ AI ASSISTANT ══════════ */
-let aiHistory = [];
+/* ══════════ ASSISTENTE LOCAL (baseado em regras) ══════════ */
 let aiInitDone = false;
 
 function initAiTab() {
   if (aiInitDone) return;
   aiInitDone = true;
-  // auto-resize textarea
   const inp = document.getElementById('ai-input');
   inp.addEventListener('input', () => {
     inp.style.height = 'auto';
@@ -1178,72 +1002,169 @@ function initAiTab() {
   });
 }
 
-function buildFinancialContext() {
+function monthTxs(offset) {
   const now = new Date();
-  const months = [];
-  for (let i = 2; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const txs = txForMonth(d);
-    const bycat = {};
-    txs.forEach(t => {
-      const cat = t._cat || catById(t.category_id);
-      bycat[cat.name] = (bycat[cat.name] || 0) + t.value;
+  const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+  return { date: d, txs: txForMonth(d) };
+}
+
+function byCategory(txs) {
+  const map = {};
+  txs.forEach(t => {
+    const cat = t._cat || catById(t.category_id);
+    if (!map[cat.name]) map[cat.name] = { icon: cat.icon, value: 0, color: cat.color, id: t.category_id };
+    map[cat.name].value += t.value;
+  });
+  return Object.entries(map).map(([name, v]) => ({ name, ...v })).sort((a,b)=>b.value-a.value);
+}
+
+function whoSpent(txs) {
+  const mine = txs.filter(t => String(t.paid_by).trim() === String(session?.user?.id).trim())
+                   .reduce((s,t)=>s+t.value,0);
+  const total = txs.reduce((s,t)=>s+t.value,0);
+  const spouse = total - mine;
+  return { mine, spouse, total };
+}
+
+/* ── Regras de resposta ────────────────────────────────────────────── */
+function answerLocal(question) {
+  const q = question.toLowerCase();
+  const { txs: curTxs } = monthTxs(0);
+  const { txs: prevTxs } = monthTxs(1);
+
+  // 1. Onde mais gastou / maiores gastos / categoria
+  if (/onde.*gast|maior.*gast|mais gastei|top.*categoria|categoria.*mais/.test(q)) {
+    if (!curTxs.length) return "Você ainda não tem lançamentos este mês. Adicione alguns gastos na aba **Adicionar** para eu poder te ajudar! 📝";
+    const cats = byCategory(curTxs);
+    const top = cats[0];
+    const total = curTxs.reduce((s,t)=>s+t.value,0);
+    const pct = ((top.value/total)*100).toFixed(0);
+    let msg = `Sua maior categoria de gastos este mês é **${top.icon} ${top.name}**, com ${fmt(top.value)} (${pct}% do total).\n\n`;
+    msg += `Top 3 categorias:\n`;
+    cats.slice(0,3).forEach((c,i) => {
+      msg += `${i+1}. ${c.icon} ${c.name} — ${fmt(c.value)}\n`;
     });
-    months.push({
-      mes: d.toLocaleDateString('pt-BR', {month:'long', year:'numeric'}),
-      total: txs.reduce((s,t)=>s+t.value,0).toFixed(2),
-      porCategoria: bycat,
-      lancamentos: txs.map(t => ({
-        nome: t.name,
-        valor: t.value,
-        categoria: (t._cat||catById(t.category_id)).name,
-        data: t.date,
-        pagoPor: String(t.paid_by).trim() === String(session?.user?.id).trim()
-          ? (profile?.name || 'Você')
-          : (t._payer?.name || 'Cônjuge')
-      }))
-    });
+    return msg;
   }
 
-  const orcamentos = budgets.map(b => {
-    const cat = catById(b.category_id);
-    const gasto = txForMonth(new Date(now.getFullYear(), now.getMonth(), 1))
-      .filter(t => t.category_id === b.category_id)
-      .reduce((s,t)=>s+t.value, 0);
-    return { categoria: cat.name, limite: b.amount, gasto: gasto.toFixed(2), excedido: gasto > b.amount };
-  });
+  // 2. Como economizar
+  if (/economizar|reduzir gasto|cortar gasto|otimizar/.test(q)) {
+    if (!curTxs.length) return "Ainda não há dados suficientes este mês. Registre alguns gastos para eu conseguir sugerir onde economizar! 💡";
+    const cats = byCategory(curTxs);
+    const top = cats.slice(0, 3);
+    let msg = `Olhando seus gastos deste mês, aqui vão algumas sugestões:\n\n`;
+    top.forEach(c => {
+      msg += `• **${c.icon} ${c.name}** (${fmt(c.value)}) — `;
+      if (c.name.toLowerCase().includes('alimenta')) msg += `considere cozinhar mais em casa e reduzir delivery.\n`;
+      else if (c.name.toLowerCase().includes('lazer')) msg += `defina um limite mensal fixo para esse tipo de gasto.\n`;
+      else if (c.name.toLowerCase().includes('transporte')) msg += `avalie rotas mais econômicas ou transporte compartilhado.\n`;
+      else msg += `é sua categoria de maior peso — vale revisar os itens.\n`;
+    });
+    const overBudget = budgets.filter(b => {
+      const spent = curTxs.filter(t=>t.category_id===b.category_id).reduce((s,t)=>s+t.value,0);
+      return spent > b.amount;
+    });
+    if (overBudget.length) {
+      msg += `\n⚠️ Você já ultrapassou o limite em ${overBudget.length} categoria${overBudget.length>1?'s':''}. Dá uma olhada na aba **Orçamento**.`;
+    }
+    return msg;
+  }
 
-  return `Você é um assistente financeiro pessoal inteligente e amigável. Responda SEMPRE em português brasileiro. Seja direto, use emojis com moderação e formate bem as respostas com listas quando apropriado.
+  // 3. Orçamento / acima do limite
+  if (/or[çc]amento|limite|acima do|excedid/.test(q)) {
+    if (!budgets.length) return "Você ainda não definiu nenhum limite de orçamento. Vá na aba **Orçamento** e toque no ✏️ de uma categoria para começar! 🎯";
+    const status = budgets.map(b => {
+      const cat = catById(b.category_id);
+      const spent = curTxs.filter(t=>t.category_id===b.category_id).reduce((s,t)=>s+t.value,0);
+      return { cat, spent, limit: b.amount, pct: (spent/b.amount)*100 };
+    }).sort((a,b)=>b.pct-a.pct);
+    const over = status.filter(s => s.pct > 100);
+    let msg = '';
+    if (over.length) {
+      msg += `⚠️ Categorias acima do limite:\n\n`;
+      over.forEach(s => msg += `• ${s.cat.icon} ${s.cat.name}: ${fmt(s.spent)} de ${fmt(s.limit)} (${s.pct.toFixed(0)}%)\n`);
+    } else {
+      msg += `✅ Nenhuma categoria ultrapassou o limite este mês! Parabéns.\n\n`;
+    }
+    const close = status.filter(s => s.pct <= 100 && s.pct >= 80);
+    if (close.length) {
+      msg += `\n👀 Perto do limite:\n`;
+      close.forEach(s => msg += `• ${s.cat.icon} ${s.cat.name}: ${s.pct.toFixed(0)}%\n`);
+    }
+    return msg;
+  }
 
-DADOS FINANCEIROS DO USUÁRIO (últimos 3 meses):
-${JSON.stringify(months, null, 2)}
+  // 4. Resumo / últimos meses
+  if (/resumo|últimos.*mes|ultimos.*mes|comparar mes|evolução|evolucao|tend[êe]ncia/.test(q)) {
+    const months = [2,1,0].map(offset => {
+      const { date, txs } = monthTxs(offset);
+      return { label: date.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}), total: txs.reduce((s,t)=>s+t.value,0), count: txs.length };
+    });
+    let msg = `Resumo dos últimos 3 meses:\n\n`;
+    months.forEach(m => msg += `• ${m.label}: ${fmt(m.total)} (${m.count} lançamento${m.count!==1?'s':''})\n`);
+    const cur = months[2].total, prev = months[1].total;
+    if (prev > 0) {
+      const diff = ((cur-prev)/prev*100);
+      if (diff > 5) msg += `\n📈 Você gastou ${diff.toFixed(0)}% a mais que no mês anterior.`;
+      else if (diff < -5) msg += `\n📉 Você gastou ${Math.abs(diff).toFixed(0)}% a menos que no mês anterior. Bom trabalho!`;
+      else msg += `\nSeus gastos ficaram estáveis em relação ao mês anterior.`;
+    }
+    return msg;
+  }
 
-ORÇAMENTOS DEFINIDOS:
-${orcamentos.length ? JSON.stringify(orcamentos, null, 2) : 'Nenhum orçamento definido ainda.'}
+  // 5. Comparação casal / quem gastou mais
+  if (/quem gast|compara[çc][ãa]o|esposa|marido|c[ôo]njuge|casal/.test(q)) {
+    if (!curTxs.length) return "Ainda não há lançamentos este mês para comparar. 📊";
+    const { mine, spouse, total } = whoSpent(curTxs);
+    const spouseProfile = profiles.find(p => p.id !== session?.user?.id);
+    const spouseName = spouseProfile?.name || 'seu cônjuge';
+    let msg = `Neste mês:\n\n`;
+    msg += `• Você gastou: ${fmt(mine)} (${total?((mine/total)*100).toFixed(0):0}%)\n`;
+    msg += `• ${spouseName} gastou: ${fmt(spouse)} (${total?((spouse/total)*100).toFixed(0):0}%)\n\n`;
+    if (mine > spouse) msg += `Você gastou mais este mês.`;
+    else if (spouse > mine) msg += `${spouseName} gastou mais este mês.`;
+    else msg += `Vocês gastaram praticamente o mesmo valor!`;
+    return msg;
+  }
 
-USUÁRIOS: ${profiles.map(p => p.id === session?.user?.id ? p.name+' (você)' : p.name).join(' e ')}
+  // 6. Total do mês
+  if (/quanto gastei|total.*m[êe]s|gasto total/.test(q)) {
+    if (!curTxs.length) return "Você ainda não tem lançamentos este mês.";
+    const total = curTxs.reduce((s,t)=>s+t.value,0);
+    return `Você gastou **${fmt(total)}** este mês, em ${curTxs.length} lançamento${curTxs.length!==1?'s':''}.`;
+  }
 
-Use esses dados para responder perguntas sobre gastos, tendências, economias e conselhos financeiros personalizados.`;
+  // 7. Maior lançamento único
+  if (/maior lan[çc]amento|gasto mais caro|compra mais cara/.test(q)) {
+    if (!curTxs.length) return "Ainda não há lançamentos este mês.";
+    const max = curTxs.reduce((a,b) => a.value > b.value ? a : b);
+    const cat = max._cat || catById(max.category_id);
+    return `Seu maior gasto individual este mês foi **${max.name}** (${cat.icon} ${cat.name}) no valor de ${fmt(max.value)}.`;
+  }
+
+  // Fallback: menu de ajuda
+  return `Não entendi bem sua pergunta 🤔. Aqui estão os temas que posso te ajudar:\n\n` +
+    `• Onde você mais gastou\n` +
+    `• Como economizar\n` +
+    `• Status do orçamento\n` +
+    `• Resumo dos últimos meses\n` +
+    `• Comparação entre você e seu cônjuge\n` +
+    `• Total gasto no mês\n` +
+    `• Maior gasto individual\n\n` +
+    `Tenta usar uma dessas palavras-chave ou toca em uma sugestão abaixo!`;
 }
 
 function appendMsg(role, text) {
   const msgs = document.getElementById('ai-messages');
   const time = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-
-  // Hide suggestions after first user message
-  if (role === 'user') {
-    document.getElementById('ai-suggestions').style.display = 'none';
-  }
-
+  if (role === 'user') document.getElementById('ai-suggestions').style.display = 'none';
   const div = document.createElement('div');
   div.className = 'msg ' + role;
-
   if (role === 'ai') {
     div.innerHTML =
-      '<div class="ai-avatar">&#129302;</div>' +
+      '<div class="ai-avatar">&#128202;</div>' +
       '<div class="msg-content">' +
-        '<div class="msg-bubble">' + text.replace(/
-/g,'<br>') + '</div>' +
+        '<div class="msg-bubble">' + text.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>') + '</div>' +
         '<div class="msg-time">' + time + '</div>' +
       '</div>';
   } else {
@@ -1251,7 +1172,6 @@ function appendMsg(role, text) {
       '<div class="msg-bubble">' + text.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>' +
       '<div class="msg-time">' + time + '</div>';
   }
-
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
   return div;
@@ -1263,7 +1183,7 @@ function appendTyping() {
   div.className = 'msg ai';
   div.id = 'ai-typing';
   div.innerHTML =
-    '<div class="ai-avatar">&#129302;</div>' +
+    '<div class="ai-avatar">&#128202;</div>' +
     '<div class="msg-content"><div class="msg-bubble"><div class="typing-dots">' +
       '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>' +
     '</div></div></div>';
@@ -1271,7 +1191,7 @@ function appendTyping() {
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-async function sendAiMessage(text) {
+function sendAiMessage(text) {
   const inp = document.getElementById('ai-input');
   const sendBtn = document.getElementById('ai-send-btn');
   const userText = text || inp.value.trim();
@@ -1282,49 +1202,26 @@ async function sendAiMessage(text) {
   sendBtn.disabled = true;
 
   appendMsg('user', userText);
-  aiHistory.push({ role: 'user', content: userText });
-
   appendTyping();
 
-  try {
-    const systemPrompt = buildFinancialContext();
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: aiHistory
-      })
-    });
-
-    const data = await response.json();
-    const reply = data.content?.[0]?.text || 'Desculpe, não consegui processar sua pergunta.';
-
+  // Simula um pequeno delay para parecer "pensando"
+  setTimeout(() => {
+    const reply = answerLocal(userText);
     document.getElementById('ai-typing')?.remove();
     appendMsg('ai', reply);
-    aiHistory.push({ role: 'assistant', content: reply });
-
-  } catch(e) {
-    document.getElementById('ai-typing')?.remove();
-    appendMsg('ai', 'Erro ao conectar com o assistente. Verifique sua conexão e tente novamente.');
-  }
-
-  sendBtn.disabled = false;
-  inp.focus();
+    sendBtn.disabled = false;
+  }, 500 + Math.random()*400);
 }
 
 document.getElementById('ai-send-btn').addEventListener('click', () => sendAiMessage());
 
 document.getElementById('ai-clear-btn').addEventListener('click', () => {
-  aiHistory = [];
   const msgs = document.getElementById('ai-messages');
   msgs.innerHTML =
     '<div class="ai-welcome">' +
-      '<div class="ai-welcome-icon">&#129302;</div>' +
+      '<div class="ai-welcome-icon">&#128202;</div>' +
       '<div class="ai-welcome-title">Ol&#225;! Sou seu assistente financeiro.</div>' +
-      '<div class="ai-welcome-sub">Tenho acesso a todos os seus lan&#231;amentos e posso te ajudar a entender melhor seus gastos.</div>' +
+      '<div class="ai-welcome-sub">Analiso seus lan&#231;amentos localmente, sem custo. Pergunte sobre seus gastos!</div>' +
     '</div>';
   document.getElementById('ai-suggestions').style.display = 'flex';
 });
