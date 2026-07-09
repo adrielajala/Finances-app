@@ -14,7 +14,7 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 :root{
   --sf:-apple-system,"SF Pro Display","SF Pro Text",BlinkMacSystemFont,sans-serif;
-  --safe-top:env(safe-area-inset-top,44px);
+  --safe-top:env(safe-area-inset-top,47px);
   --safe-bottom:env(safe-area-inset-bottom,34px);
   --glass-bg:rgba(255,255,255,0.11);
   --glass-border:rgba(255,255,255,0.26);
@@ -33,7 +33,7 @@
   --tab-height:83px;
 }
 html{height:100%;background:#0a0a12}
-body{height:100%;min-height:100dvh;overflow:hidden;background:#0a0a12;font-family:var(--sf);color:var(--text-primary);-webkit-font-smoothing:antialiased;position:fixed;inset:0;width:100%}
+body{height:100%;overflow:hidden;background:#0a0a12;font-family:var(--sf);color:var(--text-primary);-webkit-font-smoothing:antialiased}
 #bg{position:fixed;inset:0;z-index:0;background:
   radial-gradient(ellipse 80% 60% at 20% 10%,rgba(88,86,214,.55) 0%,transparent 60%),
   radial-gradient(ellipse 70% 50% at 80% 80%,rgba(10,132,255,.45) 0%,transparent 55%),
@@ -76,7 +76,7 @@ body{height:100%;min-height:100dvh;overflow:hidden;background:#0a0a12;font-famil
 .login-error{font-size:14px;color:var(--red);text-align:center;margin-top:10px;min-height:20px}
 /* PAGES */
 .page{display:none;flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
-  padding-top:max(calc(var(--safe-top)+8px),60px);padding-bottom:calc(var(--tab-height)+12px)}
+  padding-top:max(calc(var(--safe-top)+8px),68px);padding-bottom:calc(var(--tab-height)+12px)}
 .page.active{display:block}
 .page::-webkit-scrollbar{display:none}
 .page{-ms-overflow-style:none;scrollbar-width:none}
@@ -237,7 +237,7 @@ select.edit-input option{background:#1c1c1e;color:#fff}
 .edit-save-btn:disabled{opacity:.5}
 
 /* AI CHAT */
-#page-ai{display:none;padding-top:max(calc(var(--safe-top)+8px),60px);padding-bottom:0;height:100%;overflow:hidden}
+#page-ai{display:none;padding-top:max(calc(var(--safe-top)+8px),68px);padding-bottom:0;height:100%;overflow:hidden}
 #page-ai.active{display:flex;flex-direction:column}
 #page-ai .content{display:flex;flex-direction:column;flex:1;min-height:0;padding:0}
 .ai-header{padding:8px 20px 12px;display:flex;align-items:flex-end;justify-content:space-between;flex-shrink:0}
@@ -581,24 +581,41 @@ const catById=id=>categories.find(c=>c.id===id)||{name:'?',icon:'?',color:'#888'
 function txForMonth(d){const y=d.getFullYear(),m=d.getMonth();return transactions.filter(t=>{const td=new Date(t.date);return td.getFullYear()===y&&td.getMonth()===m});}
 
 async function sbGet(table,qs=''){
-  const r=await fetch(SB_URL+'/rest/v1/'+table+'?'+qs,{headers:HA(session.access_token)});
-  return r.json();
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/'+table+'?'+qs,{headers:HA(session.access_token)});
+    if(!r.ok){console.error('sbGet failed:',table,r.status);return [];}
+    return r.json();
+  }catch(e){console.error('sbGet network error:',table,e);return [];}
 }
 async function sbPost(table,body){
-  const r=await fetch(SB_URL+'/rest/v1/'+table,{method:'POST',headers:{...HA(session.access_token),'Prefer':'return=representation'},body:JSON.stringify(body)});
-  return r.json();
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/'+table,{method:'POST',headers:{...HA(session.access_token),'Prefer':'return=representation'},body:JSON.stringify(body)});
+    if(!r.ok){console.error('sbPost failed:',table,r.status);return null;}
+    return r.json();
+  }catch(e){console.error('sbPost network error:',table,e);return null;}
 }
 async function sbPatch(table,filter,body){
-  const r=await fetch(SB_URL+'/rest/v1/'+table+'?'+filter,{method:'PATCH',headers:{...HA(session.access_token),'Prefer':'return=representation'},body:JSON.stringify(body)});
-  return r.json();
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/'+table+'?'+filter,{method:'PATCH',headers:{...HA(session.access_token),'Prefer':'return=representation'},body:JSON.stringify(body)});
+    if(!r.ok){console.error('sbPatch failed:',table,r.status);return null;}
+    return r.json();
+  }catch(e){console.error('sbPatch network error:',table,e);return null;}
 }
 async function sbDelete(table,filter){
-  await fetch(SB_URL+'/rest/v1/'+table+'?'+filter,{method:'DELETE',headers:HA(session.access_token)});
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/'+table+'?'+filter,{method:'DELETE',headers:HA(session.access_token)});
+    return r.ok;
+  }catch(e){console.error('sbDelete network error:',table,e);return false;}
 }
 
 async function login(email,pass){
-  const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},body:JSON.stringify({email,password:pass})});
-  return r.json();
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},body:JSON.stringify({email,password:pass})});
+    return await r.json();
+  }catch(e){
+    console.error('login network error:',e);
+    return {error:'network'};
+  }
 }
 
 document.getElementById('login-btn').addEventListener('click',doLogin);
@@ -614,7 +631,18 @@ async function doLogin(){
   const data=await login(email,pass);
   if(data.access_token){
     session=data;
-    await afterLogin();
+    try{
+      await afterLogin();
+    }catch(e){
+      console.error('afterLogin failed:',e);
+      hideLoading();
+      errEl.textContent='Erro ao carregar dados. Verifique sua conexão e tente novamente.';
+      btn.disabled=false;btn.textContent='Entrar';
+      session=null;
+    }
+  } else if(data.error==='network'){
+    errEl.textContent='Sem conexão. Verifique sua internet e tente novamente.';
+    btn.disabled=false;btn.textContent='Entrar';
   } else {
     errEl.textContent='E-mail ou senha incorretos.';
     btn.disabled=false;btn.textContent='Entrar';
@@ -848,9 +876,17 @@ function openBudgetModal(catId,current){
   openModal({title:'Limite: '+cat.icon+' '+cat.name,sub:'Limite de gastos mensais nesta categoria',placeholder:'Ex: 500,00',type:'number',value:current||'',onConfirm:async(val)=>{
     const amount=parseFloat(val);if(!amount||amount<=0)return;
     const existing=budgets.find(b=>b.category_id===catId);
-    if(existing){await sbPatch('budgets','category_id=eq.'+catId,{amount,updated_at:new Date().toISOString()});existing.amount=amount;}
-    else{const res=await sbPost('budgets',[{category_id:catId,amount}]);if(Array.isArray(res)&&res[0])budgets.push(res[0]);}
-    renderBudget();showToast('Limite de '+fmt(amount)+' definido!');
+    let ok=false;
+    if(existing){
+      const res=await sbPatch('budgets','category_id=eq.'+catId,{amount,updated_at:new Date().toISOString()});
+      if(res){existing.amount=amount;ok=true;}
+    } else {
+      const res=await sbPost('budgets',[{category_id:catId,amount}]);
+      if(Array.isArray(res)&&res[0]){budgets.push(res[0]);ok=true;}
+    }
+    renderBudget();
+    if(ok) showToast('Limite de '+fmt(amount)+' definido!');
+    else showToast('\u274c Erro ao salvar limite. Tente novamente.');
   }});
 }
 
@@ -896,10 +932,14 @@ document.getElementById('edit-save-btn').addEventListener('click',async()=>{
   if(!date)return shake('edit-date');
   const btn=document.getElementById('edit-save-btn');
   btn.disabled=true;btn.textContent='Salvando...';
-  await sbPatch('transactions','id=eq.'+activeTx.id,{name,value,category_id:catId,paid_by:paidBy,date});
+  const res=await sbPatch('transactions','id=eq.'+activeTx.id,{name,value,category_id:catId,paid_by:paidBy,date});
+  btn.disabled=false;btn.textContent='Salvar altera\u00e7\u00f5es';
+  if(!res){
+    showToast('\u274c Erro ao salvar. Verifique sua conex\u00e3o.');
+    return;
+  }
   const fresh=await sbGet('transactions','select=*,categories(name,icon,color),profiles(name,avatar_color)&order=date.desc&limit=500');
   transactions=Array.isArray(fresh)?fresh.map(normalizeT):transactions;
-  btn.disabled=false;btn.textContent='Salvar altera\u00e7\u00f5es';
   document.getElementById('edit-overlay').classList.remove('open');
   activeTx=null;
   renderHome();renderBudget();
@@ -914,10 +954,15 @@ document.getElementById('action-delete-btn').addEventListener('click',()=>{
     const confirmed=confirm('Excluir "'+tx.name+'" ('+fmt(tx.value)+')?\\n\\nEssa a\u00e7\u00e3o n\u00e3o pode ser desfeita.');
     if(!confirmed)return;
     showLoading();
-    await sbDelete('transactions','id=eq.'+tx.id);
+    const ok=await sbDelete('transactions','id=eq.'+tx.id);
+    hideLoading();
+    if(!ok){
+      showToast('\u274c Erro ao excluir. Verifique sua conex\u00e3o.');
+      activeTx=null;
+      return;
+    }
     transactions=transactions.filter(t=>t.id!==tx.id);
     activeTx=null;
-    hideLoading();
     renderHome();renderBudget();
     showToast('\U0001f5d1 Lan\u00e7amento exclu\u00eddo.');
   },300);
